@@ -1,0 +1,6 @@
+﻿backend/.env
+channel-service/.env
+*.pyc
+__pycache__/
+dataset/output/
+.env
