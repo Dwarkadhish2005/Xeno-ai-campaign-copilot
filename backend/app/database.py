@@ -10,6 +10,11 @@ engine = create_async_engine(
     max_overflow=10,
     pool_timeout=30,
     pool_recycle=1800,
+    connect_args={
+        "ssl": "require",
+        "server_settings": {"application_name": "xeno_campaign_copilot"},
+        "statement_cache_size": 0,
+    },
 )
 
 async_session_maker = async_sessionmaker(

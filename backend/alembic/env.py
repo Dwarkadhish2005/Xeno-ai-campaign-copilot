@@ -39,6 +39,8 @@ if os.environ.get("DATABASE_URL"):
         pass
 
 from app.base import Base
+# import models so Base.metadata is populated for autogenerate
+import app.models
 
 # Interpret the config file for Python logging (tolerant to minimal ini)
 try:
