@@ -4,3 +4,10 @@ channel-service/.env
 __pycache__/
 dataset/output/
 .env
+.agents/
+skills-lock.json
+.vscode/mcp.json
+node_modules/
+.next/
+dist/
+build/
