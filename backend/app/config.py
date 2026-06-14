@@ -8,6 +8,16 @@ class Settings(BaseSettings):
     CHANNEL_SERVICE_URL: str = Field(default="http://localhost:8001", description="Channel service URL")
     ENVIRONMENT: str = Field(default="development", description="dev/prod")
 
+    # ── Demo / Presentation Mode ──────────────────────────────────────────────
+    DEMO_MODE: bool = Field(
+        default=False,
+        description="When True, only DEMO_LIMIT messages are actually dispatched per campaign launch."
+    )
+    DEMO_LIMIT: int = Field(
+        default=10,
+        description="Max customers to process when DEMO_MODE is enabled."
+    )
+
     @field_validator("DATABASE_URL")
     @classmethod
     def fix_database_url(cls, v: str) -> str:

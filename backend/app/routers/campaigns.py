@@ -11,6 +11,7 @@ from ..schemas import CampaignCreate, CampaignOut, CampaignPlan
 from ..services.groq_service import groq_service
 from ..services.audience_service import audience_service
 from ..services.executor_service import execute_campaign
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -263,8 +264,29 @@ async def launch_campaign(
 
     background_tasks.add_task(_run)
 
+    # Build demo-aware response metadata
+    demo_info = None
+    if settings.DEMO_MODE:
+        audience_size = campaign.audience_size or 0
+        dispatched = min(audience_size, settings.DEMO_LIMIT)
+        demo_info = {
+            "demo_mode": True,
+            "full_audience_size": audience_size,
+            "messages_simulated": dispatched,
+            "demo_limit": settings.DEMO_LIMIT,
+        }
+        logger.info(
+            f"[DEMO MODE] Campaign {campaign_id} launched — "
+            f"Audience: {audience_size}, Messages Simulated: {dispatched}"
+        )
+
     return {
         "success": True,
-        "data": {"campaign_id": campaign_id},
-        "message": "Campaign launch initiated. Execution running in background.",
+        "data": {"campaign_id": campaign_id, **(demo_info or {})},
+        "message": (
+            f"[DEMO MODE] Campaign launch initiated — "
+            f"{demo_info['messages_simulated']} of {demo_info['full_audience_size']} messages simulated."
+            if settings.DEMO_MODE
+            else "Campaign launch initiated. Execution running in background."
+        ),
     }

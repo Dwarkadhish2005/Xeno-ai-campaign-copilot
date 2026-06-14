@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from ..models import Campaign, CampaignAudience, Customer, CustomerProfile, CommunicationLog
 from .channel_client import channel_client
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,15 @@ async def execute_campaign(campaign_id: int, db: AsyncSession):
             return
 
         logger.info(f"Executing campaign {campaign_id} for {len(audience)} customers")
+
+        # ── Demo Mode Audience Cap ────────────────────────────────────────────
+        real_audience_size = len(audience)
+        if settings.DEMO_MODE:
+            audience = audience[: settings.DEMO_LIMIT]
+            logger.info(
+                f"[DEMO MODE] Capping dispatch to {len(audience)} of {real_audience_size} customers "
+                f"(DEMO_LIMIT={settings.DEMO_LIMIT}). Full audience stored in DB is unchanged."
+            )
 
         sent_count = 0
         failed_count = 0
