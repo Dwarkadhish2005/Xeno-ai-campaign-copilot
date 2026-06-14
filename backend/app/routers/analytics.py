@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, text
 from datetime import datetime
 
 from ..dependencies import get_async_session
@@ -11,6 +11,57 @@ from ..schemas import WebhookCallback
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["analytics"])
+
+
+# ─── Admin: Clear Database ─────────────────────────────────────────────────────
+
+@router.post("/admin/clear-database")
+async def clear_database(
+    body: dict = None,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Clear all data from the database.
+    - mode='campaigns_only'  → deletes campaigns + logs + audience (keeps customers/orders/profiles)
+    - mode='all' (default)   → wipes everything (all tables)
+    """
+    mode = (body or {}).get("mode", "all")
+
+    if mode == "campaigns_only":
+        tables = [
+            "campaign_conversions",
+            "communication_logs",
+            "campaign_audience",
+            "campaigns",
+        ]
+    else:
+        # Full wipe — children before parents
+        tables = [
+            "campaign_conversions",
+            "communication_logs",
+            "campaign_audience",
+            "campaigns",
+            "customer_profiles",
+            "orders",
+            "customers",
+        ]
+
+    cleared = []
+    for table in tables:
+        await session.execute(
+            text(f'TRUNCATE TABLE "{table}" RESTART IDENTITY CASCADE')
+        )
+        cleared.append(table)
+
+    await session.commit()
+    logger.info(f"[ADMIN] Database cleared. Mode={mode}. Tables: {cleared}")
+
+    return {
+        "success": True,
+        "data": {"cleared_tables": cleared, "mode": mode},
+        "message": f"Database cleared successfully ({mode} mode). {len(cleared)} tables wiped.",
+    }
+
 
 
 # ─── Webhook Callback from Channel Service ─────────────────────────────────────

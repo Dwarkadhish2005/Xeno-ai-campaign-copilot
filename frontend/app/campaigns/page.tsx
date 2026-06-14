@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { getCampaigns, deleteCampaign } from '@/lib/api';
 import { CHANNEL_ICONS, formatNumber, timeAgo } from '@/lib/utils';
@@ -13,9 +13,10 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const load = async (status?: string) => {
-    setLoading(true);
+  const load = useCallback(async (status?: string, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await getCampaigns(status === 'all' ? undefined : status);
       setCampaigns(res.data.data.items || []);
@@ -24,18 +25,42 @@ export default function CampaignsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  // Load when tab changes
   useEffect(() => { load(activeTab); }, [activeTab]);
+
+  // Re-fetch when user returns to this tab (e.g. after deleting from detail page)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        load(activeTab, true);
+      }
+    };
+    const handleFocus = () => { load(activeTab, true); };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [activeTab, load]);
 
   const handleDelete = async (id: number, name: string) => {
     if (!window.confirm(`Permanently delete "${name}" and all its data? This cannot be undone.`)) return;
+    setDeletingId(id);
     try {
       await deleteCampaign(id);
       toast(`Campaign "${name}" deleted.`, 'success');
+      // Optimistically remove from list, then re-fetch to sync totals
       setCampaigns(prev => prev.filter(c => c.id !== id));
+      // Silent background re-fetch to ensure consistency
+      setTimeout(() => load(activeTab, true), 300);
     } catch (e: any) {
       toast(e.response?.data?.detail || 'Delete failed', 'error');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -51,9 +76,22 @@ export default function CampaignsPage() {
           <h1 className="section-title" style={{ fontSize: '28px' }}>🚀 Campaigns</h1>
           <p className="section-subtitle">Manage your AI-powered marketing campaigns</p>
         </div>
-        <Link href="/planner">
-          <button className="btn-primary">✨ New Campaign</button>
-        </Link>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <button
+            onClick={() => load(activeTab)}
+            disabled={loading}
+            style={{
+              padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+              border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)',
+              color: '#94a3b8', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
+            }}
+          >
+            {loading ? '⏳' : '↺ Refresh'}
+          </button>
+          <Link href="/planner">
+            <button className="btn-primary">✨ New Campaign</button>
+          </Link>
+        </div>
       </div>
 
       {/* Status Tabs */}
@@ -110,7 +148,7 @@ export default function CampaignsPage() {
             </thead>
             <tbody>
               {campaigns.map((c: any) => (
-                <tr key={c.id}>
+                <tr key={c.id} style={{ opacity: deletingId === c.id ? 0.4 : 1, transition: 'opacity 0.2s' }}>
                   <td>
                     <div style={{ fontWeight: '600', marginBottom: '2px' }}>{c.name}</div>
                     {c.audience_name && (
@@ -149,17 +187,18 @@ export default function CampaignsPage() {
                         )}
                         <button
                           onClick={() => handleDelete(c.id, c.name)}
+                          disabled={deletingId === c.id}
                           style={{
                             padding: '6px 12px', fontSize: '12px', borderRadius: '8px',
                             border: '1px solid rgba(239,68,68,0.35)',
                             background: 'rgba(239,68,68,0.08)',
-                            color: '#f87171', cursor: 'pointer', fontWeight: '600',
-                            transition: 'all 0.15s',
+                            color: '#f87171', cursor: deletingId === c.id ? 'not-allowed' : 'pointer',
+                            fontWeight: '600', transition: 'all 0.15s',
                           }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.18)')}
+                          onMouseEnter={e => deletingId !== c.id && (e.currentTarget.style.background = 'rgba(239,68,68,0.18)')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
                         >
-                          🗑️
+                          {deletingId === c.id ? '⏳' : '🗑️'}
                         </button>
                       </div>
                   </td>

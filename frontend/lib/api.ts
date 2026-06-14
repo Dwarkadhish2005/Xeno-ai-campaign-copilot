@@ -91,9 +91,11 @@ export const resetCampaign = (id: number) =>
   api.post(`/campaigns/${id}/reset`);
 export const deleteCampaign = (id: number) =>
   api.delete(`/campaigns/${id}`);
+// Cache-busting _t param ensures we always get fresh data from the server
 export const getCampaigns = (status?: string, page = 1) =>
-  api.get('/campaigns', { params: { status, page } });
-export const getCampaign = (id: number) => api.get(`/campaigns/${id}`);
+  api.get('/campaigns', { params: { status, page, _t: Date.now() } });
+export const getCampaign = (id: number) =>
+  api.get(`/campaigns/${id}`, { params: { _t: Date.now() } });
 
 // ─── Audience ─────────────────────────────────────────────────────────────────
 
@@ -102,12 +104,20 @@ export const previewAudience = (filters: Filter[]) =>
 export const buildAudience = (campaignId: number, filters: Filter[]) =>
   api.post('/audience/build', { campaign_id: campaignId, filters });
 export const getCampaignAudience = (id: number, page = 1) =>
-  api.get(`/audience/campaign/${id}`, { params: { page } });
+  api.get(`/audience/campaign/${id}`, { params: { page, _t: Date.now() } });
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
 export const getCampaignAnalytics = (id: number) =>
-  api.get(`/analytics/campaigns/${id}`);
-export const getDashboard = () => api.get('/analytics/dashboard');
+  api.get(`/analytics/campaigns/${id}`, { params: { _t: Date.now() } });
+// Cache-busting _t param ensures fresh dashboard data after mutations
+export const getDashboard = () =>
+  api.get('/analytics/dashboard', { params: { _t: Date.now() } });
 export const getTimeline = (id: number) =>
-  api.get(`/analytics/campaigns/${id}/timeline`);
+  api.get(`/analytics/campaigns/${id}/timeline`, { params: { _t: Date.now() } });
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+
+export const clearDatabase = (mode: 'all' | 'campaigns_only' = 'all') =>
+  api.post('/admin/clear-database', { mode });
+

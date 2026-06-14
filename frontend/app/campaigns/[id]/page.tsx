@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -36,24 +36,49 @@ export default function CampaignDetailPage() {
   const [audienceTotal, setAudienceTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
+  const isMounted = useRef(true);
 
-  const load = async () => {
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [campRes, audRes] = await Promise.all([
         getCampaign(id),
         getCampaignAudience(id),
       ]);
-      setCampaign(campRes.data.data);
-      setAudience(audRes.data.data.items || []);
-      setAudienceTotal(audRes.data.data.total || 0);
+      if (isMounted.current) {
+        setCampaign(campRes.data.data);
+        setAudience(audRes.data.data.items || []);
+        setAudienceTotal(audRes.data.data.total || 0);
+      }
     } catch {
-      toast('Failed to load campaign', 'error');
+      if (isMounted.current) {
+        toast('Failed to load campaign', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => {
+    isMounted.current = true;
+    load();
+
+    // Re-fetch when user returns to this tab (fixes stale status/metrics)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') load(true);
+    };
+    const handleFocus = () => load(true);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      isMounted.current = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [id, load]);
 
   const handleGenerateMessage = async () => {
     setActionLoading('message');

@@ -245,7 +245,8 @@ async def reset_campaign(
         .where(Campaign.id == campaign_id)
         .values(status="draft", audience_size=0, updated_at=datetime.utcnow())
     )
-    # NOTE: session auto-commits via get_async_session dependency — no manual commit needed
+    # Explicitly commit to ensure all Core deletes + update are persisted
+    await session.commit()
 
     logger.info(f"Campaign {campaign_id} reset to 'draft' from '{previous_status}'")
 

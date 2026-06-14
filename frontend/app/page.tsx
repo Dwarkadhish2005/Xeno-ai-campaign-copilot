@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { getDashboard, generateProfiles } from '@/lib/api';
+import { getDashboard, generateProfiles, clearDatabase } from '@/lib/api';
 import { formatCurrency, formatNumber, STATUS_COLORS, CHANNEL_ICONS, timeAgo } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -19,35 +19,89 @@ const SEGMENT_COLORS: Record<string, string> = {
   unknown: '#475569',
 };
 
+type ClearMode = 'campaigns_only' | 'all';
+
 export default function DashboardPage() {
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [generatingProfiles, setGeneratingProfiles] = useState(false);
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [clearMode, setClearMode] = useState<ClearMode>('campaigns_only');
+  const [clearing, setClearing] = useState(false);
+  const isMounted = useRef(true);
 
-  const load = async () => {
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await getDashboard();
-      setData(res.data.data);
+      if (isMounted.current) {
+        setData(res.data.data);
+      }
     } catch {
-      toast('Failed to load dashboard data', 'error');
+      if (isMounted.current) {
+        toast('Failed to load dashboard data', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  // Initial load
+  useEffect(() => {
+    isMounted.current = true;
+    load();
+
+    // Re-fetch when user returns to this tab (fixes stale data after navigating away)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        load(true); // silent refresh — keeps existing data visible while refreshing
+      }
+    };
+
+    // Re-fetch when window regains focus (e.g., Alt+Tab back)
+    const handleFocus = () => {
+      load(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      isMounted.current = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [load]);
 
   const handleGenerateProfiles = async () => {
     setGeneratingProfiles(true);
     try {
       await generateProfiles();
       toast('Customer profiles generated!', 'success');
-      await load();
+      await load(); // full refresh with loading state
     } catch {
       toast('Failed to generate profiles', 'error');
     } finally {
       setGeneratingProfiles(false);
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    setClearing(true);
+    try {
+      const res = await clearDatabase(clearMode);
+      const msg = res.data.message || 'Database cleared.';
+      toast(msg, 'success');
+      setClearModalOpen(false);
+      setData(null);
+      await load(); // full refresh
+    } catch (e: any) {
+      toast(e.response?.data?.detail || 'Failed to clear database', 'error');
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -63,6 +117,88 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {/* Clear Database Confirmation Modal */}
+      {clearModalOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '24px',
+        }}>
+          <div style={{
+            background: '#0f172a', border: '1px solid rgba(239,68,68,0.4)',
+            borderRadius: '16px', padding: '32px', maxWidth: '480px', width: '100%',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ fontSize: '40px', marginBottom: '16px', textAlign: 'center' }}>⚠️</div>
+            <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#ef4444', marginBottom: '8px', textAlign: 'center' }}>
+              Clear Database
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginBottom: '24px', lineHeight: '1.6' }}>
+              This action is <strong style={{ color: '#f87171' }}>irreversible</strong>. Choose what to clear:
+            </p>
+
+            {/* Mode selector */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+              {([
+                {
+                  value: 'campaigns_only' as ClearMode,
+                  label: '🚀 Campaigns Only',
+                  desc: 'Deletes all campaigns, logs & audience data. Keeps customers & orders.',
+                },
+                {
+                  value: 'all' as ClearMode,
+                  label: '🗑️ Full Wipe (Everything)',
+                  desc: 'Deletes ALL data including customers, orders, and campaigns.',
+                },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setClearMode(opt.value)}
+                  style={{
+                    padding: '14px 16px', borderRadius: '10px', textAlign: 'left',
+                    border: `1px solid ${clearMode === opt.value ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                    background: clearMode === opt.value ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.03)',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: clearMode === opt.value ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>
+                    {opt.label}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={() => setClearModalOpen(false)}
+                disabled={clearing}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: '8px', fontWeight: '600',
+                  border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)',
+                  color: '#94a3b8', cursor: 'pointer', fontSize: '14px',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearDatabase}
+                disabled={clearing}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: '8px', fontWeight: '700',
+                  border: '1px solid rgba(239,68,68,0.5)', background: 'rgba(239,68,68,0.2)',
+                  color: '#f87171', cursor: clearing ? 'not-allowed' : 'pointer', fontSize: '14px',
+                  opacity: clearing ? 0.6 : 1,
+                }}
+              >
+                {clearing ? '⏳ Clearing...' : '🗑️ Confirm Clear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
@@ -74,11 +210,37 @@ export default function DashboardPage() {
         </div>
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <button
+            onClick={() => load()}
+            disabled={loading}
+            style={{
+              padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+              border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)',
+              color: '#94a3b8', cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s', opacity: loading ? 0.6 : 1,
+            }}
+            onMouseEnter={e => !loading && (e.currentTarget.style.background = 'rgba(255,255,255,0.09)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+          >
+            {loading ? '⏳ Loading...' : '↺ Refresh'}
+          </button>
+          <button
             className="btn-secondary"
             onClick={handleGenerateProfiles}
             disabled={generatingProfiles}
           >
             {generatingProfiles ? '⏳ Generating...' : '🔄 Refresh Profiles'}
+          </button>
+          <button
+            onClick={() => setClearModalOpen(true)}
+            style={{
+              padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+              border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)',
+              color: '#f87171', cursor: 'pointer', transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.16)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
+          >
+            🗑️ Clear Database
           </button>
           <Link href="/planner">
             <button className="btn-primary">✨ New Campaign</button>
