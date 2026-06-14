@@ -266,7 +266,7 @@ async def delete_campaign(
     communication logs, campaign audience, campaign conversions.
     """
     from ..models import CommunicationLog, CampaignAudience, CampaignConversion
-    from sqlalchemy import delete
+    from sqlalchemy import delete as sa_delete
 
     res = await session.execute(select(Campaign).where(Campaign.id == campaign_id))
     campaign = res.scalar_one_or_none()
@@ -275,19 +275,36 @@ async def delete_campaign(
 
     campaign_name = campaign.name
 
-    # Delete all related data in correct order (FK constraints)
+    # Detach the loaded ORM object so the bulk Core deletes below
+    # don't conflict with SQLAlchemy's identity map (asyncpg silent no-op bug)
+    session.expunge(campaign)
+
+    # Delete all related data in FK-safe order, with synchronize_session=False
+    # so SQLAlchemy doesn't try to reconcile the identity map after each bulk delete
     await session.execute(
-        delete(CampaignConversion).where(CampaignConversion.campaign_id == campaign_id)
+        sa_delete(CampaignConversion)
+        .where(CampaignConversion.campaign_id == campaign_id)
+        .execution_options(synchronize_session=False)
     )
     await session.execute(
-        delete(CommunicationLog).where(CommunicationLog.campaign_id == campaign_id)
+        sa_delete(CommunicationLog)
+        .where(CommunicationLog.campaign_id == campaign_id)
+        .execution_options(synchronize_session=False)
     )
     await session.execute(
-        delete(CampaignAudience).where(CampaignAudience.campaign_id == campaign_id)
+        sa_delete(CampaignAudience)
+        .where(CampaignAudience.campaign_id == campaign_id)
+        .execution_options(synchronize_session=False)
     )
     await session.execute(
-        delete(Campaign).where(Campaign.id == campaign_id)
+        sa_delete(Campaign)
+        .where(Campaign.id == campaign_id)
+        .execution_options(synchronize_session=False)
     )
+
+    # Explicitly commit — ensures the deletes hit Supabase before this
+    # function returns (the dependency's auto-commit is a safety net only)
+    await session.commit()
 
     logger.info(f"Campaign {campaign_id} ('{campaign_name}') permanently deleted")
 
@@ -296,6 +313,7 @@ async def delete_campaign(
         "data": {"campaign_id": campaign_id, "name": campaign_name},
         "message": f"Campaign '{campaign_name}' and all its data permanently deleted.",
     }
+
 
 @router.post("/{campaign_id}/approve")
 async def approve_campaign(
