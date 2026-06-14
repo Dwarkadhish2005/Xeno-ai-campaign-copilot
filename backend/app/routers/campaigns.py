@@ -213,10 +213,10 @@ async def reset_campaign(
 ):
     """
     Force-reset a campaign back to 'draft' status.
-    Clears communication logs so it can be re-launched cleanly.
+    Clears communication logs and audience so it can be re-launched cleanly.
     Useful for stuck 'running' campaigns or demo resets.
     """
-    from ..models import CommunicationLog
+    from ..models import CommunicationLog, CampaignAudience
     from sqlalchemy import delete
 
     res = await session.execute(select(Campaign).where(Campaign.id == campaign_id))
@@ -227,25 +227,32 @@ async def reset_campaign(
     if campaign.status == "draft":
         raise HTTPException(status_code=400, detail="Campaign is already in 'draft' status")
 
+    previous_status = campaign.status
+
     # Clear existing communication logs
     await session.execute(
         delete(CommunicationLog).where(CommunicationLog.campaign_id == campaign_id)
     )
 
-    # Reset campaign to draft
+    # Clear audience records so audience can be rebuilt fresh
+    await session.execute(
+        delete(CampaignAudience).where(CampaignAudience.campaign_id == campaign_id)
+    )
+
+    # Reset campaign to draft with audience_size cleared
     await session.execute(
         update(Campaign)
         .where(Campaign.id == campaign_id)
-        .values(status="draft", updated_at=datetime.utcnow())
+        .values(status="draft", audience_size=0, updated_at=datetime.utcnow())
     )
-    await session.commit()
+    # NOTE: session auto-commits via get_async_session dependency — no manual commit needed
 
-    logger.info(f"Campaign {campaign_id} reset to 'draft' from '{campaign.status}'")
+    logger.info(f"Campaign {campaign_id} reset to 'draft' from '{previous_status}'")
 
     return {
         "success": True,
-        "data": {"campaign_id": campaign_id, "previous_status": campaign.status},
-        "message": f"Campaign reset to draft (was '{campaign.status}'). Communication logs cleared.",
+        "data": {"campaign_id": campaign_id, "previous_status": previous_status},
+        "message": f"Campaign reset to draft (was '{previous_status}'). Logs and audience cleared.",
     }
 
 
