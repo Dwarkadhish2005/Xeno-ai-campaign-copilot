@@ -206,6 +206,49 @@ async def generate_message(
         raise HTTPException(status_code=500, detail=f"Message generation failed: {str(e)}")
 
 
+@router.post("/{campaign_id}/reset")
+async def reset_campaign(
+    campaign_id: int,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Force-reset a campaign back to 'draft' status.
+    Clears communication logs so it can be re-launched cleanly.
+    Useful for stuck 'running' campaigns or demo resets.
+    """
+    from ..models import CommunicationLog
+    from sqlalchemy import delete
+
+    res = await session.execute(select(Campaign).where(Campaign.id == campaign_id))
+    campaign = res.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    if campaign.status == "draft":
+        raise HTTPException(status_code=400, detail="Campaign is already in 'draft' status")
+
+    # Clear existing communication logs
+    await session.execute(
+        delete(CommunicationLog).where(CommunicationLog.campaign_id == campaign_id)
+    )
+
+    # Reset campaign to draft
+    await session.execute(
+        update(Campaign)
+        .where(Campaign.id == campaign_id)
+        .values(status="draft", updated_at=datetime.utcnow())
+    )
+    await session.commit()
+
+    logger.info(f"Campaign {campaign_id} reset to 'draft' from '{campaign.status}'")
+
+    return {
+        "success": True,
+        "data": {"campaign_id": campaign_id, "previous_status": campaign.status},
+        "message": f"Campaign reset to draft (was '{campaign.status}'). Communication logs cleared.",
+    }
+
+
 @router.post("/{campaign_id}/approve")
 async def approve_campaign(
     campaign_id: int,
