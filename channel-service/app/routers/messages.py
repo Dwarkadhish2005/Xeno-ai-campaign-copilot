@@ -130,33 +130,59 @@ async def send_message(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """Accept a message and simulate sending it through the channel."""
-    # Insert into communication_logs (using raw SQL to write to shared table)
+    """
+    Accept a message dispatch request and simulate the delivery lifecycle.
+
+    The main backend executor already inserts a 'sent' CommunicationLog row
+    before calling this endpoint.  We find that row (by campaign_id + customer_id
+    with status='sent') and run the lifecycle simulation on it rather than
+    inserting a duplicate row.
+    """
     from sqlalchemy import text
 
     now = datetime.utcnow()
-    insert_sql = text("""
-        INSERT INTO communication_logs
-            (campaign_id, customer_id, channel, message, personalized_message, status, sent_at, metadata)
-        VALUES
-            (:campaign_id, :customer_id, :channel, :message, :message, 'sent', :sent_at, :metadata::jsonb)
-        RETURNING id
-    """)
-    result = await session.execute(
-        insert_sql,
-        {
-            "campaign_id": body.campaign_id,
-            "customer_id": body.customer_id,
-            "channel": body.channel,
-            "message": body.message,
-            "sent_at": now,
-            "metadata": f'{{"subject": "{body.subject or ""}"}}',
-        },
-    )
-    log_id = result.scalar_one()
-    await session.commit()
 
-    # Schedule lifecycle simulation in background
+    # ── Find the log row the executor already inserted ────────────────────────
+    find_sql = text("""
+        SELECT id FROM communication_logs
+        WHERE campaign_id = :campaign_id
+          AND customer_id = :customer_id
+          AND status = 'sent'
+        ORDER BY sent_at DESC
+        LIMIT 1
+    """)
+    find_result = await session.execute(
+        find_sql,
+        {"campaign_id": body.campaign_id, "customer_id": body.customer_id},
+    )
+    row = find_result.fetchone()
+
+    if row:
+        log_id = row[0]
+    else:
+        # Fallback: executor row not found — insert one ourselves
+        insert_sql = text("""
+            INSERT INTO communication_logs
+                (campaign_id, customer_id, channel, message, personalized_message, status, sent_at, metadata)
+            VALUES
+                (:campaign_id, :customer_id, :channel, :message, :message, 'sent', :sent_at, :metadata::jsonb)
+            RETURNING id
+        """)
+        insert_result = await session.execute(
+            insert_sql,
+            {
+                "campaign_id": body.campaign_id,
+                "customer_id": body.customer_id,
+                "channel": body.channel,
+                "message": body.message,
+                "sent_at": now,
+                "metadata": f'{{"subject": "{body.subject or ""}"}}',
+            },
+        )
+        log_id = insert_result.scalar_one()
+        await session.commit()
+
+    # ── Schedule lifecycle simulation ─────────────────────────────────────────
     background_tasks.add_task(
         simulate_message_lifecycle, log_id, body.campaign_id, body.customer_id
     )
@@ -166,6 +192,7 @@ async def send_message(
         "data": {"message_id": log_id, "status": "sent", "timestamp": now.isoformat()},
         "message": "Message sent",
     }
+
 
 
 @router.get("/messages/{message_id}/status")
