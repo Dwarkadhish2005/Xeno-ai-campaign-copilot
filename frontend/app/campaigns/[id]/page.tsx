@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   getCampaign, generateMessage, approveCampaign, launchCampaign,
-  getCampaignAudience,
+  resetCampaign, getCampaignAudience,
 } from '@/lib/api';
 import { CHANNEL_ICONS, formatNumber, formatDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
@@ -95,6 +95,20 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const handleReset = async () => {
+    if (!window.confirm('Reset this campaign back to draft? This will clear all communication logs and audience data.')) return;
+    setActionLoading('reset');
+    try {
+      await resetCampaign(id);
+      toast('Campaign reset to draft!', 'success');
+      await load();
+    } catch (e: any) {
+      toast(e.response?.data?.detail || 'Reset failed', 'error');
+    } finally {
+      setActionLoading('');
+    }
+  };
+
   if (loading) {
     return (
       <div>
@@ -167,6 +181,27 @@ export default function CampaignDetailPage() {
               <Link href={`/analytics?campaign=${id}`}>
                 <button className="btn-primary">📊 View Analytics</button>
               </Link>
+            )}
+            {campaign.status !== 'draft' && (
+              <button
+                onClick={handleReset}
+                disabled={actionLoading === 'reset'}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(239,68,68,0.4)',
+                  background: 'rgba(239,68,68,0.1)',
+                  color: '#f87171',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.2)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.1)')}
+              >
+                {actionLoading === 'reset' ? '⏳ Resetting...' : '🔄 Reset to Draft'}
+              </button>
             )}
           </div>
         </div>

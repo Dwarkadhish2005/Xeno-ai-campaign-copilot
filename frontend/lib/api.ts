@@ -87,6 +87,8 @@ export const approveCampaign = (id: number) =>
   api.post(`/campaigns/${id}/approve`);
 export const launchCampaign = (id: number) =>
   api.post(`/campaigns/${id}/launch`);
+export const resetCampaign = (id: number) =>
+  api.post(`/campaigns/${id}/reset`);
 export const getCampaigns = (status?: string, page = 1) =>
   api.get('/campaigns', { params: { status, page } });
 export const getCampaign = (id: number) => api.get(`/campaigns/${id}`);
