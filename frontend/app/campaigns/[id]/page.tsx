@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   getCampaign, generateMessage, approveCampaign, launchCampaign,
-  resetCampaign, getCampaignAudience,
+  resetCampaign, deleteCampaign, getCampaignAudience,
 } from '@/lib/api';
 import { CHANNEL_ICONS, formatNumber, formatDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
@@ -109,6 +109,19 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`Permanently delete "${campaign?.name}" and ALL its data? This cannot be undone.`)) return;
+    setActionLoading('delete');
+    try {
+      await deleteCampaign(id);
+      toast('Campaign permanently deleted.', 'success');
+      router.push('/campaigns');
+    } catch (e: any) {
+      toast(e.response?.data?.detail || 'Delete failed', 'error');
+      setActionLoading('');
+    }
+  };
+
   if (loading) {
     return (
       <div>
@@ -203,6 +216,25 @@ export default function CampaignDetailPage() {
                 {actionLoading === 'reset' ? '⏳ Resetting...' : '🔄 Reset to Draft'}
               </button>
             )}
+            <button
+              onClick={handleDelete}
+              disabled={actionLoading === 'delete'}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: '1px solid rgba(239,68,68,0.6)',
+                background: 'rgba(239,68,68,0.15)',
+                color: '#ef4444',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '700',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.28)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.15)')}
+            >
+              {actionLoading === 'delete' ? '⏳ Deleting...' : '🗑️ Delete Campaign'}
+            </button>
           </div>
         </div>
       </div>

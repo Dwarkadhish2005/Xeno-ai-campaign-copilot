@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getCampaigns } from '@/lib/api';
+import { getCampaigns, deleteCampaign } from '@/lib/api';
 import { CHANNEL_ICONS, formatNumber, timeAgo } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 
@@ -27,6 +27,17 @@ export default function CampaignsPage() {
   };
 
   useEffect(() => { load(activeTab); }, [activeTab]);
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!window.confirm(`Permanently delete "${name}" and all its data? This cannot be undone.`)) return;
+    try {
+      await deleteCampaign(id);
+      toast(`Campaign "${name}" deleted.`, 'success');
+      setCampaigns(prev => prev.filter(c => c.id !== id));
+    } catch (e: any) {
+      toast(e.response?.data?.detail || 'Delete failed', 'error');
+    }
+  };
 
   const statusColors: Record<string, string> = {
     all: '#6366f1', draft: '#94a3b8', ready: '#60a5fa', approved: '#c4b5fd',
@@ -124,19 +135,33 @@ export default function CampaignsPage() {
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <Link href={`/campaigns/${c.id}`}>
-                        <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                          View
-                        </button>
-                      </Link>
-                      {c.status === 'completed' && (
-                        <Link href={`/analytics?campaign=${c.id}`}>
-                          <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                            📊 Analytics
+                        <Link href={`/campaigns/${c.id}`}>
+                          <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                            View
                           </button>
                         </Link>
-                      )}
-                    </div>
+                        {c.status === 'completed' && (
+                          <Link href={`/analytics?campaign=${c.id}`}>
+                            <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                              📊 Analytics
+                            </button>
+                          </Link>
+                        )}
+                        <button
+                          onClick={() => handleDelete(c.id, c.name)}
+                          style={{
+                            padding: '6px 12px', fontSize: '12px', borderRadius: '8px',
+                            border: '1px solid rgba(239,68,68,0.35)',
+                            background: 'rgba(239,68,68,0.08)',
+                            color: '#f87171', cursor: 'pointer', fontWeight: '600',
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.18)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
+                        >
+                          🗑️
+                        </button>
+                      </div>
                   </td>
                 </tr>
               ))}

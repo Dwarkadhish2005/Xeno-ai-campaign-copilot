@@ -41,6 +41,7 @@ async def upload_customers(file: UploadFile = File(...), session: AsyncSession =
         return JSONResponse(status_code=400, content={"success": False, "data": None, "message": f"Failed to parse CSV: {e}"})
 
     errors: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
     total_rows = len(df)
 
     # Normalize column names
@@ -58,15 +59,21 @@ async def upload_customers(file: UploadFile = File(...), session: AsyncSession =
             os.unlink(tmp_path)
             return JSONResponse(status_code=400, content={"success": False, "data": None, "message": f"Missing required column: {col}"})
 
-    # Check duplicate emails within file
-    if "email" in df.columns:
-        dup_mask = df["email"].duplicated(keep=False)
-        for idx in df[dup_mask].index:
-            errors.append(_row_error(idx, "email", f"Duplicate email in file: {df.at[idx,'email']}"))
-
-    # Validate phone and signup_date formats
+    # Deduplicate within file — keep first occurrence, skip the rest
+    seen_emails: set = set()
+    skip_due_to_file_dup: set = set()
     for idx, row in df.iterrows():
-        email = row.get("email")
+        email = str(row.get("email", "")).strip().lower()
+        if email in seen_emails:
+            skip_due_to_file_dup.add(idx)
+            skipped.append({"row": int(idx) + 1, "field": "email", "message": f"Duplicate in file (kept first): {row.get('email')}"})
+        else:
+            seen_emails.add(email)
+
+    # Validate phone and signup_date formats for non-duplicate rows
+    for idx, row in df.iterrows():
+        if idx in skip_due_to_file_dup:
+            continue
         phone = row.get("phone") if "phone" in df.columns else None
         signup = row.get("signup_date")
 
@@ -85,20 +92,30 @@ async def upload_customers(file: UploadFile = File(...), session: AsyncSession =
             if not PHONE_REGEX.match(str(phone).strip()):
                 errors.append(_row_error(idx, "phone", f"Invalid E.164 phone: {phone}"))
 
-    # Check existing emails in DB
-    emails = [e for e in df["email"].dropna().astype(str).unique()]
-    if emails:
-        q = await session.execute(select(Customer.email).where(Customer.email.in_(emails)))
-        existing = {r[0] for r in q.fetchall()}
+    # Check existing emails in DB — skip them silently (not errors)
+    candidate_emails = [
+        str(row.get("email", "")).strip()
+        for idx, row in df.iterrows()
+        if idx not in skip_due_to_file_dup
+    ]
+    already_in_db: set = set()
+    if candidate_emails:
+        q = await session.execute(select(Customer.email).where(Customer.email.in_(candidate_emails)))
+        already_in_db = {r[0] for r in q.fetchall()}
         for idx, row in df.iterrows():
-            if str(row.get("email")) in existing:
-                errors.append(_row_error(idx, "email", f"Email already exists in DB: {row.get('email')}"))
+            if idx in skip_due_to_file_dup:
+                continue
+            if str(row.get("email", "")).strip() in already_in_db:
+                skipped.append({"row": int(idx) + 1, "field": "email", "message": f"Already in DB, skipped: {row.get('email')}"})
 
-    # Determine valid rows
+    # Determine valid rows (exclude file dups, DB dups, and validation errors)
     invalid_rows = {e["row"] for e in errors}
+    skipped_rows = {s["row"] for s in skipped}
+
     records: List[Dict[str, Any]] = []
     for idx, row in df.iterrows():
-        if (idx + 1) in invalid_rows:
+        row_num = idx + 1
+        if row_num in invalid_rows or row_num in skipped_rows:
             continue
         rec = {}
         if id_col:
@@ -127,12 +144,15 @@ async def upload_customers(file: UploadFile = File(...), session: AsyncSession =
     os.unlink(tmp_path)
     result = {
         "total_rows": total_rows,
-        "valid_rows": len(records),
-        "invalid_rows": len(errors),
-        "errors": errors,
         "inserted_count": inserted,
+        "skipped_count": len(skipped),
+        "error_count": len(errors),
+        "skipped": skipped[:20],   # cap to avoid huge responses
+        "errors": errors,
     }
-    return {"success": True, "data": result, "message": f"Upload processed: {inserted} inserted, {len(errors)} errors"}
+    status_msg = f"Upload processed: {inserted} inserted, {len(skipped)} skipped (duplicates), {len(errors)} errors"
+    return {"success": True, "data": result, "message": status_msg}
+
 
 
 @router.post("/orders")

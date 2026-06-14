@@ -256,10 +256,52 @@ async def reset_campaign(
     }
 
 
+@router.delete("/{campaign_id}")
+async def delete_campaign(
+    campaign_id: int,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Permanently delete a campaign and ALL its related data:
+    communication logs, campaign audience, campaign conversions.
+    """
+    from ..models import CommunicationLog, CampaignAudience, CampaignConversion
+    from sqlalchemy import delete
+
+    res = await session.execute(select(Campaign).where(Campaign.id == campaign_id))
+    campaign = res.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    campaign_name = campaign.name
+
+    # Delete all related data in correct order (FK constraints)
+    await session.execute(
+        delete(CampaignConversion).where(CampaignConversion.campaign_id == campaign_id)
+    )
+    await session.execute(
+        delete(CommunicationLog).where(CommunicationLog.campaign_id == campaign_id)
+    )
+    await session.execute(
+        delete(CampaignAudience).where(CampaignAudience.campaign_id == campaign_id)
+    )
+    await session.execute(
+        delete(Campaign).where(Campaign.id == campaign_id)
+    )
+
+    logger.info(f"Campaign {campaign_id} ('{campaign_name}') permanently deleted")
+
+    return {
+        "success": True,
+        "data": {"campaign_id": campaign_id, "name": campaign_name},
+        "message": f"Campaign '{campaign_name}' and all its data permanently deleted.",
+    }
+
 @router.post("/{campaign_id}/approve")
 async def approve_campaign(
     campaign_id: int,
     session: AsyncSession = Depends(get_async_session),
+
 ):
     """Approve a ready campaign."""
     res = await session.execute(select(Campaign).where(Campaign.id == campaign_id))
